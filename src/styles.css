@@ -409,6 +409,20 @@ h2 {
   gap: 18px;
 }
 
+.match-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.match-toolbar p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .overview-summary,
 .predictor-status-panel {
   display: flex;
@@ -696,11 +710,27 @@ h2 {
 }
 
 .mini-match {
+  position: relative;
   display: flex;
   justify-content: space-between;
   gap: 10px;
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.mini-match.played {
+  opacity: 0.66;
+}
+
+.mini-match.played::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(91, 80, 62, 0.58);
+  transform: translateY(-50%);
 }
 
 .mini-match strong {
@@ -763,6 +793,12 @@ h2 {
   align-items: center;
   gap: 16px;
   padding: 12px;
+}
+
+.match-row.jump-highlight {
+  border-radius: 8px;
+  background: #fff6dd;
+  box-shadow: inset 0 0 0 2px rgba(210, 163, 58, 0.58);
 }
 
 .match-meta {
@@ -1048,6 +1084,20 @@ h2 {
   margin: 0;
   color: var(--muted);
   font-weight: 700;
+}
+
+.bracket-summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.delete-button {
+  border-color: #e4aaa6;
+  background: #fff0ef;
+  color: #8f2119;
+  white-space: nowrap;
 }
 
 .bracket-scroll {
@@ -1358,6 +1408,15 @@ h2 {
     gap: 10px;
   }
 
+  .match-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .match-toolbar .secondary-button {
+    width: 100%;
+  }
+
   .match-teams {
     grid-template-columns: 1fr;
   }
@@ -1378,6 +1437,11 @@ h2 {
 
   .bracket-summary {
     display: grid;
+  }
+
+  .bracket-summary-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .simulation-panel {

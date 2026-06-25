@@ -190,6 +190,10 @@ test('opens from bundled fallback, edits a score, and persists it', async ({ pag
 
   await page.getByRole('button', { name: 'Matches' }).click();
   await expect(page.locator('.predictor-status-panel')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Jump to latest game' })).toBeVisible();
+  await expect(page.locator('.match-toolbar')).toContainText(/Live:|Next: .*PT|Latest: .*PT/);
+  await page.getByRole('button', { name: 'Jump to latest game' }).click();
+  await expect(page.locator('.match-row.jump-highlight')).toBeVisible();
   const finalRow = page.locator('.match-row').filter({ hasText: 'Mexico' }).filter({ hasText: 'South Africa' }).first();
   await expect(finalRow).toBeVisible();
   await expect(finalRow.getByLabel('Home score')).toHaveValue('2');
@@ -229,10 +233,21 @@ test('opens from bundled fallback, edits a score, and persists it', async ({ pag
   await expect(persistedRow.getByLabel('Home score')).toHaveValue('1');
   await expect(finalRow.getByLabel('Home score')).toHaveValue('2');
 
+  await page.getByRole('button', { name: 'Groups' }).click();
+  await expect(page.locator('.mini-match.played').first()).toBeVisible();
+
   await page.getByRole('button', { name: 'Knockout' }).click();
   await expect(page.getByRole('heading', { name: 'Knockout' })).toBeVisible();
   await expect(page.locator('.bracket-card').first()).toBeVisible();
   await expect(page.locator('.bracket-connector').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete all' })).toBeDisabled();
+  const firstBracketCard = page.locator('.bracket-card').first();
+  await firstBracketCard.getByLabel('Home score').fill('1');
+  await firstBracketCard.getByLabel('Away score').fill('0');
+  await expect(page.getByRole('button', { name: 'Delete all' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Delete all' }).click();
+  await expect(firstBracketCard.getByLabel('Home score')).toHaveValue('');
+  await expect(firstBracketCard.getByLabel('Away score')).toHaveValue('');
 
   await page.screenshot({ path: `test-results/world-cup-sim-${testInfo.project.name}.png`, fullPage: true });
 });

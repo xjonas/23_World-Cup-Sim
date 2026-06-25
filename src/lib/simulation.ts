@@ -1,3 +1,4 @@
+import { KNOCKOUT_PHASES } from '../data/constants';
 import type { Match, MatchId, MatchOdds, Score, SimulationState, Team, TeamId } from '../types';
 
 export interface GroupSimulationResult {
@@ -106,6 +107,29 @@ export function clearSimulatedGroupStageScores(matches: Match[], state: Simulati
     scoreSources,
     simulationOdds,
     lastSimulatedAt: undefined
+  };
+}
+
+export function clearManualBracketEntries(matches: Match[], state: SimulationState): SimulationState {
+  const bracketMatchIds = new Set(matches.filter((match) => KNOCKOUT_PHASES.includes(match.phase)).map((match) => match.id));
+  const scoreOverrides = { ...state.scoreOverrides };
+  const scoreSources = { ...state.scoreSources };
+  const simulationOdds = { ...state.simulationOdds };
+  const manualKnockoutWinners = { ...state.manualKnockoutWinners };
+
+  for (const matchId of bracketMatchIds) {
+    delete scoreOverrides[matchId];
+    delete scoreSources[matchId];
+    delete simulationOdds[matchId];
+    delete manualKnockoutWinners[matchId];
+  }
+
+  return {
+    ...state,
+    scoreOverrides,
+    scoreSources,
+    simulationOdds,
+    manualKnockoutWinners
   };
 }
 

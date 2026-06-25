@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
-import { BRACKET_SOURCES, GROUPS, KNOCKOUT_GAME_LABELS, PHASE_LABELS, PHASE_ORDER } from './data/constants';
+import { BRACKET_SOURCES, GROUPS, KNOCKOUT_GAME_LABELS, KNOCKOUT_PHASES, PHASE_LABELS, PHASE_ORDER } from './data/constants';
 import { SNAPSHOT } from './data/snapshot';
 import { fetchTournamentData } from './lib/espn';
 import { formatDateTime, formatPacificTime, formatShortDate, phaseLabel, teamName } from './lib/format';
@@ -7,7 +7,7 @@ import { buildBracket, getThirdPlaceAssignment } from './lib/bracket';
 import { buildBracketLayout } from './lib/bracketLayout';
 import { fetchPolymarketOddsForMatches } from './lib/polymarket';
 import { buildLeaderboard, isPredictionLocked, predictionToScore, scorePrediction } from './lib/predictions';
-import { clearSimulatedGroupStageScores, simulateGroupStage } from './lib/simulation';
+import { clearManualBracketEntries, clearSimulatedGroupStageScores, simulateGroupStage } from './lib/simulation';
 import { buildGroupRankings, buildThirdPlaceRanking, getEffectiveScore } from './lib/standings';
 import { loadSimulationState, saveSimulationState } from './lib/storage';
 import { supabase, type SupabaseUser } from './lib/supabase';
@@ -144,6 +144,12 @@ export default function App() {
     () => predictions.filter((prediction) => prediction.userId === user?.id && prediction.source === 'simulation').length,
     [predictions, user?.id]
   );
+  const bracketManualEntryCount = useMemo(() => {
+    const bracketMatchIds = new Set(data.matches.filter((match) => KNOCKOUT_PHASES.includes(match.phase)).map((match) => match.id));
+    const scoreOverrideCount = Object.keys(state.scoreOverrides).filter((matchId) => bracketMatchIds.has(matchId)).length;
+    const winnerCount = Object.keys(state.manualKnockoutWinners).filter((matchId) => bracketMatchIds.has(matchId)).length;
+    return scoreOverrideCount + winnerCount;
+  }, [data.matches, state.manualKnockoutWinners, state.scoreOverrides]);
 
   useEffect(() => {
     if (authReady && !user && tab === 'overview') {
@@ -576,6 +582,10 @@ export default function App() {
     );
   }, [data.matches, now, predictions, showTopNotice, user]);
 
+  const clearBracketEntries = useCallback(() => {
+    setState((current) => clearManualBracketEntries(data.matches, current));
+  }, [data.matches]);
+
   const sourceText =
     dataMode === 'live'
       ? 'Live ESPN data'
@@ -701,8 +711,10 @@ export default function App() {
           bracket={bracket}
           state={state}
           thirdPlaceRanking={thirdPlaceRanking}
+          manualEntryCount={bracketManualEntryCount}
           onScore={setScoreOverride}
           onClearScore={clearScoreOverride}
+          onClearBracketEntries={clearBracketEntries}
         />
       ) : null}
     </main>
@@ -1006,7 +1018,7 @@ function GroupCard({
       <StandingsTable standings={ranking.standings} teamsById={teamsById} group={group} onMoveTeam={onMoveTeam} />
       <div className="mini-match-list">
         {matches.map((match) => (
-          <div key={match.id} className="mini-match">
+          <div key={match.id} className={match.completed ? 'mini-match played' : 'mini-match'}>
             <span>
               {formatShortDate(match.kickoffUtc)} · {formatPacificTime(match.kickoffUtc)}
             </span>
@@ -1225,9 +1237,36 @@ function MatchesView({
   const simulatedGroupCount = matches.filter(
     (match) => match.phase === 'group-stage' && state.scoreSources[match.id] === 'simulation'
   ).length;
+  const jumpTargets = useMemo(() => getLatestMatchTargets(matches, now), [matches, now]);
+  const [highlightedMatchIds, setHighlightedMatchIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!highlightedMatchIds.length) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setHighlightedMatchIds([]), 2_200);
+    return () => window.clearTimeout(timeout);
+  }, [highlightedMatchIds]);
+
+  function jumpToLatestGame() {
+    if (!jumpTargets.length) {
+      return;
+    }
+    setHighlightedMatchIds(jumpTargets.map((match) => match.id));
+    document.getElementById(matchElementId(jumpTargets[0].id))?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   return (
     <section className="view-stack">
+      <section className="panel match-toolbar">
+        <div>
+          <h2>Matches</h2>
+          {jumpTargets.length ? <p>{formatJumpTargetSummary(jumpTargets, teamsById, now)}</p> : null}
+        </div>
+        <button className="secondary-button" onClick={jumpToLatestGame} disabled={!jumpTargets.length}>
+          Jump to latest game
+        </button>
+      </section>
       <section className="panel simulation-panel">
         <div>
           <h2>
@@ -1279,6 +1318,7 @@ function MatchesView({
                     now={now}
                     onPrediction={onPrediction}
                     onClearPrediction={onClearPrediction}
+                    highlighted={highlightedMatchIds.includes(match.id)}
                   />
                 );
               })}
@@ -1304,7 +1344,8 @@ function MatchEditor({
   ownPrediction,
   now,
   onPrediction,
-  onClearPrediction
+  onClearPrediction,
+  highlighted
 }: {
   match: Match;
   teamsById: Map<string, Team>;
@@ -1320,6 +1361,7 @@ function MatchEditor({
   now: Date;
   onPrediction: (match: Match, score: Score) => void;
   onClearPrediction: (match: Match) => void;
+  highlighted?: boolean;
 }) {
   const score = getEffectiveScore(match, state);
   const homeLabel = bracketMatch?.home.label ?? teamName(teamsById, match.homeTeamId);
@@ -1341,7 +1383,7 @@ function MatchEditor({
   );
 
   return (
-    <article className="match-row">
+    <article id={matchElementId(match.id)} className={highlighted ? 'match-row jump-highlight' : 'match-row'}>
       <div className="match-meta">
         <strong>{formatDateTime(match.kickoffUtc)}</strong>
         <span>{match.group ? `Group ${match.group}` : phaseLabel(match)}</span>
@@ -1408,14 +1450,18 @@ function BracketView({
   bracket,
   state,
   thirdPlaceRanking,
+  manualEntryCount,
   onScore,
-  onClearScore
+  onClearScore,
+  onClearBracketEntries
 }: {
   bracket: BracketMatch[];
   state: SimulationState;
   thirdPlaceRanking: ThirdPlaceRanking;
+  manualEntryCount: number;
   onScore: (matchId: string, score: Score) => void;
   onClearScore: (matchId: string) => void;
+  onClearBracketEntries: () => void;
 }) {
   const layout = buildBracketLayout(bracket);
   const visiblePhases = ['round-of-32', 'round-of-16', 'quarterfinals', 'semifinals', 'final'] as const;
@@ -1423,10 +1469,20 @@ function BracketView({
   return (
     <section className="view-stack">
       <section className="panel bracket-summary">
-        <h2>Knockout</h2>
-        <p>
-          Qualified third-place groups: {thirdPlaceRanking.qualifiedGroups.length ? thirdPlaceRanking.qualifiedGroups.join(', ') : 'TBD'}
-        </p>
+        <div>
+          <h2>
+            Knockout{' '}
+            <InfoTip text="Third-place slots use FIFA Annex C after the eight qualifying third-place groups are known. If groups are still tied on points, goal difference and goals scored, adjust the order in Groups for fair-play or drawing-lots decisions." />
+          </h2>
+          <p>
+            Qualified third-place groups: {thirdPlaceRanking.qualifiedGroups.length ? thirdPlaceRanking.qualifiedGroups.join(', ') : 'TBD'}
+          </p>
+        </div>
+        <div className="bracket-summary-actions">
+          <button className="secondary-button delete-button" onClick={onClearBracketEntries} disabled={!manualEntryCount}>
+            Delete all
+          </button>
+        </div>
       </section>
       <section className="bracket-scroll">
         <div className="bracket-headings">
@@ -1748,6 +1804,41 @@ function formatTotalGoalsSummary(totalGoals: MatchOdds['totalGoals']) {
     pieces.push(`${formatPercent(totalGoals.under)} for 0-${underMax} total goals`);
   }
   return pieces.length ? pieces.join(' · ') : `line is ${formatNumber(totalGoals.line)} total goals`;
+}
+
+function matchElementId(matchId: string) {
+  return `match-${matchId}`;
+}
+
+function getLatestMatchTargets(matches: Match[], now: Date) {
+  const sorted = [...matches].sort((a, b) => a.kickoffUtc.localeCompare(b.kickoffUtc));
+  const live = sorted.filter(isLiveMatch);
+  if (live.length) {
+    return live;
+  }
+
+  const nowTime = now.getTime();
+  const next = sorted.find((match) => !match.completed && new Date(match.kickoffUtc).getTime() >= nowTime);
+  if (next) {
+    return sorted.filter((match) => !match.completed && match.kickoffUtc === next.kickoffUtc);
+  }
+
+  const latest = [...sorted].reverse().find((match) => match.completed || new Date(match.kickoffUtc).getTime() < nowTime);
+  return latest
+    ? sorted.filter((match) => match.kickoffUtc === latest.kickoffUtc && (match.completed || new Date(match.kickoffUtc).getTime() < nowTime))
+    : [];
+}
+
+function formatJumpTargetSummary(matches: Match[], teamsById: Map<string, Team>, now: Date) {
+  const [first] = matches;
+  const label = matches.map((match) => `${teamName(teamsById, match.homeTeamId)} vs ${teamName(teamsById, match.awayTeamId)}`).join('; ');
+  if (matches.some(isLiveMatch)) {
+    return `Live: ${label}`;
+  }
+  if (!first.completed && new Date(first.kickoffUtc).getTime() >= now.getTime()) {
+    return `Next: ${formatShortDate(first.kickoffUtc)} · ${formatPacificTime(first.kickoffUtc)} · ${label}`;
+  }
+  return `Latest: ${formatShortDate(first.kickoffUtc)} · ${formatPacificTime(first.kickoffUtc)} · ${label}`;
 }
 
 function isApiFinal(match: Match) {

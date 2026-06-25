@@ -5,7 +5,7 @@ import { buildBracket, getThirdPlaceAssignment } from './bracket';
 import { buildBracketLayout } from './bracketLayout';
 import { normalizeAmericanOdds, normalizePolymarketPrices } from './odds';
 import { buildLeaderboard, isPredictionLocked, scorePrediction } from './predictions';
-import { clearSimulatedGroupStageScores, simulateGroupMatchScore, simulateGroupStage } from './simulation';
+import { clearManualBracketEntries, clearSimulatedGroupStageScores, simulateGroupMatchScore, simulateGroupStage } from './simulation';
 import { buildGroupRankings, buildThirdPlaceRanking, getEffectiveScore } from './standings';
 
 const baseState: SimulationState = {
@@ -183,6 +183,42 @@ describe('third-place ranking and bracket mapping', () => {
     const bracket = buildBracket([knockoutMatch('760491')], teams, rankings, third, baseState);
     expect(bracket[0].home.teamId).toBe('A1');
     expect(bracket[0].away.teamId).toBe('E3');
+  });
+
+  it('clears only manual knockout entries from bracket state', () => {
+    const state: SimulationState = {
+      ...baseState,
+      scoreOverrides: {
+        '1': { home: 2, away: 1 },
+        '760491': { home: 1, away: 0 },
+        '760502': { home: 2, away: 2 }
+      },
+      scoreSources: {
+        '1': 'manual',
+        '760491': 'manual',
+        '760502': 'manual'
+      },
+      simulationOdds: {
+        '760491': {
+          provider: 'Test',
+          confidence: 'low',
+          moneyline: { homeWin: 0.5, draw: 0.25, awayWin: 0.25 }
+        }
+      },
+      manualKnockoutWinners: {
+        '760502': 'A1'
+      }
+    };
+
+    const cleared = clearManualBracketEntries([groupMatch('1', 'A', 'A1', 'A2', 2, 1), knockoutMatch('760491'), knockoutMatch('760502', 'round-of-16')], state);
+
+    expect(cleared.scoreOverrides['1']).toEqual({ home: 2, away: 1 });
+    expect(cleared.scoreOverrides['760491']).toBeUndefined();
+    expect(cleared.scoreOverrides['760502']).toBeUndefined();
+    expect(cleared.scoreSources['1']).toBe('manual');
+    expect(cleared.scoreSources['760491']).toBeUndefined();
+    expect(cleared.simulationOdds['760491']).toBeUndefined();
+    expect(cleared.manualKnockoutWinners['760502']).toBeUndefined();
   });
 });
 
